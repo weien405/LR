@@ -1,36 +1,25 @@
+# -*- coding: utf-8 -*-
 """
-正式版中文 Streamlit 医学预测器
+AP ICU 预后预测工具
 
-目标：
-- 与论文最终 LR 模型保持一致
-- 面向二分类风险预测（favorable vs unfavorable）
-- 提供规范、稳定、可部署的页面结构
-- 不再依赖 TreeSHAP / LIME
-
-建议的 LR.pkl bundle 最低字段格式：
-{
-    "model": fitted sklearn/imblearn estimator or pipeline with predict_proba,
-    "feature_cols": list[str],                    # 与训练时完全一致的原始输入顺序
-    "class_labels": ["Favorable", "Unfavorable"],# 可选；缺省时按 classes 推断
-    "positive_label": "Unfavorable",             # 可选；缺省时使用第二类
-    "threshold": 0.5,                            # 可选；缺省 0.5
-    "ruleout_threshold": 0.20,                   # 可选
-    "rulein_threshold": 0.50,                    # 可选
-    "train_median": {feature: value, ...},       # 可选；用于默认值
-    "feature_meta": {                            # 可选；可覆盖代码内默认展示信息
-        "vaso_any_24h": {"label_zh": "...", "unit": "...", "help_zh": "..."}
-    },
-    "example_patient": {feature: value, ...},    # 可选；用于一键填充示例患者
-    "coefficient_table": [                       # 可选；推荐为正式解释输出
-        {
-            "feature": "...",
-            "coefficient": 0.12,
-            "odds_ratio": 1.13,
-            "direction_zh": "值越高，风险越高"
-        }
-    ],
-    "study_title_zh": "..."
-}
+说明：
+1. 本页面用于加载最终 LR.pkl 模型并进行推理；
+2. 页面仅用于研究展示和论文配套说明，不可替代临床判断；
+3. 模型 bundle 至少需要包含：
+   - model
+   - feature_cols
+4. 推荐包含：
+   - class_labels
+   - positive_label
+   - threshold
+   - ruleout_threshold
+   - rulein_threshold
+   - train_median
+   - feature_meta
+   - example_patient
+   - coefficient_table
+   - study_title_zh
+   - model_name
 """
 
 from pathlib import Path
@@ -43,8 +32,7 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="AP 不良轨迹早期预测器（LR）",
-    page_icon="🩺",
+    page_title="AP ICU 预后预测工具",
     layout="wide",
 )
 
@@ -52,172 +40,157 @@ APP_DIR = Path(__file__).resolve().parent
 MODEL_PATH = APP_DIR / "LR.pkl"
 
 APP_TEXT = {
-    "title": "AP ICU 患者不良轨迹早期预测器",
+    "title": "AP ICU 预后预测工具",
     "subtitle": "基于最终 Logistic Regression（LR）模型的研究配套网页工具",
-    "caption": (
-        "本工具仅用于研究展示和论文配套说明，不可替代临床判断。"
-        "请确保加载的 LR.pkl 与论文最终模型完全一致。"
-    ),
-    "binary_negative": "Favorable trajectory",
-    "binary_positive": "Unfavorable trajectory",
-    "predict_button": "开始预测",
-    "fill_default": "恢复训练集默认值",
-    "fill_example": "填入示例患者",
-    "section_model": "模型说明",
-    "section_input": "患者输入",
-    "section_result": "预测结果",
-    "section_prob": "概率输出",
-    "section_interpret": "模型解释",
-    "section_snapshot": "当前输入摘要",
-    "section_notice": "使用说明与免责声明",
-    "threshold_label": "预设判定阈值",
-    "risk_probability": "不良轨迹概率",
-    "predicted_label": "预测分类",
-    "risk_band": "风险分层",
-    "download": "下载结果摘要 CSV",
-    "bundle_error": "无法加载 LR.pkl，请确认模型文件已放在网页目录且 bundle 字段完整。",
-    "binary_model_error": "当前网页仅适用于二分类 LR 终模型；加载对象并非二分类模型。",
-    "missing_model_error": "未检测到 LR.pkl。请将最终 LR 模型 bundle 命名为 LR.pkl 后再启动页面。",
-    "coef_exported_note": "以下为模型导出的正式变量解释摘要，适合论文配套展示。",
-    "coef_fallback_note": (
-        "以下系数由已加载 LR 模型直接提取。若训练中包含标准化/变换，"
-        "这些系数更适合看方向，不宜直接当作原始量纲 OR 解释。"
-    ),
-    "no_interpret_note": (
-        "当前 bundle 未提供正式的 coefficient_table，网页仅展示变量与概率输出。"
-        "如需正式解释结果，建议在训练导出阶段加入 coefficient_table。"
-    ),
+    "caption": "本工具仅用于研究展示和论文配套说明，不可替代临床判断。请确保加载的 LR.pkl 与论文最终模型完全一致。",
+    "model_file": "当前模型文件：LR.pkl",
+    "model_section": "模型说明",
+    "input_section": "患者输入",
+    "input_caption": "建议使用经过核对的患者真实数据；初始值仅用于页面演示。",
+    "result_section": "预测结果",
+    "prob_section": "概率输出",
+    "interpret_section": "模型解释",
+    "snapshot_section": "当前输入摘要",
+    "notice_section": "使用说明与免责声明",
     "notice_text": (
-        "1. 请输入与论文定义一致的前24小时/入ICU附近变量；"
-        "2. 页面默认值仅为训练集代表值，不能替代真实患者数据；"
-        "3. 若输入超出生理合理范围，请先核对数据来源；"
-        "4. 本工具用于研究交流、补充材料与在线演示，不作为独立临床决策依据。"
+        "1. 请按论文最终定义输入前24小时或入 ICU 附近变量；"
+        "2. 页面默认值仅用于演示，不可替代真实患者数据；"
+        "3. 若输入值明显超出生理合理范围，请先核对数据来源；"
+        "4. 本工具仅用于研究交流、补充材料和在线演示，不作为独立临床决策依据。"
     ),
-    "input_help_prefix": "变量代码",
-    "yes": "是",
-    "no": "否",
-    "probability_table_class": "类别",
-    "probability_table_probability": "概率",
+    "reset_button": "恢复训练集默认值",
+    "example_button": "填入示例患者",
+    "predict_button": "开始预测",
+    "outcome_positive": "不良轨迹",
+    "outcome_negative": "非不良轨迹",
+    "predicted_label": "预测分类",
+    "risk_probability": "不良轨迹概率",
+    "risk_band": "风险分层",
+    "threshold_label": "预设判定阈值",
+    "download": "下载结果摘要 CSV",
+    "binary_yes": "是",
+    "binary_no": "否",
+    "prob_table_class": "类别",
+    "prob_table_probability": "概率",
     "snapshot_feature": "变量",
     "snapshot_value": "输入值",
     "snapshot_unit": "单位",
+    "coef_exported_note": "以下为训练脚本导出的正式变量解释摘要，适合论文配套展示。",
+    "coef_fallback_note": "以下系数由当前 LR 模型直接提取。若训练流程包含标准化或其他变换，这些系数更适合用于方向解释，而不宜直接当作原始量纲效应。",
+    "coef_missing_note": "当前 bundle 未提供可展示的系数解释信息，页面仅显示概率输出和输入摘要。",
+    "missing_model_error": "未检测到 LR.pkl。请将最终 LR 模型文件放在 predictor.py 同目录下后重新部署。",
+    "bundle_error": "无法加载 LR.pkl。请确认模型文件存在、未损坏，且 bundle 字段完整。",
+    "bundle_field_error": "LR.pkl 缺少必要字段：model 或 feature_cols。",
+    "binary_model_error": "当前网页仅适用于二分类 LR 模型，但加载对象并非二分类模型。",
+    "predict_error": "模型推理失败。请检查 LR.pkl 是否与当前变量顺序完全一致。",
+    "input_error": "检测到缺失或非数值输入，请重新检查。",
 }
 
 DEFAULT_FEATURE_META = {
     "vaso_any_24h": {
         "label_zh": "24小时内是否使用升压药",
-        "label_en": "Any vasopressor within 24 h",
-        "unit": "是/否",
+        "unit": "",
         "input_type": "binary",
-        "help_zh": "ICU入科后前24小时内是否曾使用任一升压药。",
+        "help_zh": "ICU 入科后前24小时内是否曾使用任一升压药。",
         "default": 0,
     },
     "spo2_mean_24h": {
-        "label_zh": "24小时平均 SpO₂",
-        "label_en": "Mean SpO2 within 24 h",
+        "label_zh": "24小时内平均SpO₂（%）",
         "unit": "%",
         "input_type": "continuous",
-        "help_zh": "ICU入科后前24小时平均血氧饱和度。",
+        "help_zh": "ICU 入科后前24小时内平均血氧饱和度。",
         "default": 96.0,
         "min": 50.0,
         "max": 100.0,
         "step": 0.1,
         "format": "%.1f",
-        "normal_range": "95–100",
+        "normal_range": "95–100%",
     },
     "rrt_24h": {
-        "label_zh": "24小时内是否接受 RRT",
-        "label_en": "Any RRT within 24 h",
-        "unit": "是/否",
+        "label_zh": "24小时内是否接受RRT",
+        "unit": "",
         "input_type": "binary",
-        "help_zh": "ICU入科后前24小时内是否接受任一肾脏替代治疗。",
+        "help_zh": "ICU 入科后前24小时内是否接受任一肾脏替代治疗。",
         "default": 0,
     },
     "resp_rate_mean_24h": {
-        "label_zh": "24小时平均呼吸频率",
-        "label_en": "Mean respiratory rate within 24 h",
+        "label_zh": "24小时内平均呼吸频率（次/分）",
         "unit": "次/分",
         "input_type": "continuous",
-        "help_zh": "ICU入科后前24小时平均呼吸频率。",
+        "help_zh": "ICU 入科后前24小时内平均呼吸频率。",
         "default": 18.0,
         "min": 0.0,
         "max": 80.0,
         "step": 0.1,
         "format": "%.1f",
-        "normal_range": "12–20",
+        "normal_range": "12–20 次/分",
     },
     "mv_24h": {
         "label_zh": "24小时内是否机械通气",
-        "label_en": "Mechanical ventilation within 24 h",
-        "unit": "是/否",
+        "unit": "",
         "input_type": "binary",
-        "help_zh": "ICU入科后前24小时内是否接受机械通气。",
+        "help_zh": "ICU 入科后前24小时内是否接受机械通气。",
         "default": 0,
     },
     "lactate_closest_around_icu": {
-        "label_zh": "入ICU附近乳酸",
-        "label_en": "Lactate closest around ICU admission",
+        "label_zh": "ICU入科附近乳酸（mmol/L）",
         "unit": "mmol/L",
         "input_type": "continuous",
-        "help_zh": "入ICU附近最近一次乳酸值。",
+        "help_zh": "入 ICU 前后最近一次乳酸检测值。",
         "default": 1.5,
         "min": 0.0,
         "max": 25.0,
         "step": 0.1,
         "format": "%.2f",
-        "normal_range": "0.5–2.0",
+        "normal_range": "0.5–2.0 mmol/L",
     },
     "heart_rate_mean_24h": {
-        "label_zh": "24小时平均心率",
-        "label_en": "Mean heart rate within 24 h",
+        "label_zh": "24小时内平均心率（次/分）",
         "unit": "次/分",
         "input_type": "continuous",
-        "help_zh": "ICU入科后前24小时平均心率。",
+        "help_zh": "ICU 入科后前24小时内平均心率。",
         "default": 90.0,
         "min": 0.0,
         "max": 220.0,
         "step": 0.1,
         "format": "%.1f",
-        "normal_range": "60–100",
+        "normal_range": "60–100 次/分",
     },
     "creatinine_closest_around_icu": {
-        "label_zh": "入ICU附近肌酐",
-        "label_en": "Creatinine closest around ICU admission",
+        "label_zh": "ICU入科附近肌酐（mg/dL）",
         "unit": "mg/dL",
         "input_type": "continuous",
-        "help_zh": "入ICU附近最近一次肌酐值。",
+        "help_zh": "入 ICU 前后最近一次肌酐值。",
         "default": 1.0,
         "min": 0.0,
         "max": 20.0,
         "step": 0.01,
         "format": "%.2f",
-        "normal_range": "0.6–1.3",
+        "normal_range": "0.6–1.3 mg/dL",
     },
     "bun_closest_around_icu": {
-        "label_zh": "入ICU附近 BUN",
-        "label_en": "BUN closest around ICU admission",
+        "label_zh": "ICU入科附近尿素氮（BUN, mg/dL）",
         "unit": "mg/dL",
         "input_type": "continuous",
-        "help_zh": "入ICU附近最近一次尿素氮值。",
+        "help_zh": "入 ICU 前后最近一次尿素氮值。",
         "default": 15.0,
         "min": 0.0,
         "max": 150.0,
         "step": 0.1,
         "format": "%.1f",
-        "normal_range": "7–20",
+        "normal_range": "7–20 mg/dL",
     },
     "bilirubin_total_closest_around_icu": {
-        "label_zh": "入ICU附近总胆红素",
-        "label_en": "Total bilirubin closest around ICU admission",
+        "label_zh": "ICU入科附近总胆红素（mg/dL）",
         "unit": "mg/dL",
         "input_type": "continuous",
-        "help_zh": "入ICU附近最近一次总胆红素值。",
+        "help_zh": "入 ICU 前后最近一次总胆红素值。",
         "default": 0.8,
         "min": 0.0,
         "max": 40.0,
         "step": 0.01,
         "format": "%.2f",
-        "normal_range": "0.2–1.2",
+        "normal_range": "0.2–1.2 mg/dL",
     },
 }
 
@@ -248,7 +221,6 @@ def merge_feature_meta(feature_cols, bundle_meta):
         override = bundle_meta.get(feat, {}) if isinstance(bundle_meta, dict) else {}
         merged.update(override)
         merged.setdefault("label_zh", feat)
-        merged.setdefault("label_en", feat)
         merged.setdefault("unit", "")
         merged.setdefault("input_type", "continuous")
         merged.setdefault("default", 0.0)
@@ -265,8 +237,14 @@ def load_defaults(feature_cols, medians: pd.Series, feature_meta, example_patien
             defaults[feat] = float(medians[feat])
         else:
             defaults[feat] = float(feature_meta[feat].get("default", 0.0))
+
     if isinstance(example_patient, dict):
-        example = {feat: float(example_patient.get(feat, defaults[feat])) for feat in feature_cols}
+        example = {}
+        for feat in feature_cols:
+            raw_value = example_patient.get(feat, defaults[feat])
+            if pd.isna(raw_value):
+                raw_value = defaults[feat]
+            example[feat] = float(raw_value)
     else:
         example = defaults.copy()
     return defaults, example
@@ -354,10 +332,10 @@ except Exception as exc:
 model = bundle.get("model")
 feature_cols = list(bundle.get("feature_cols", []))
 if model is None or not feature_cols:
-    st.error("LR.pkl 缺少最低必要字段：model / feature_cols。")
+    st.error(APP_TEXT["bundle_field_error"])
     st.stop()
 
-raw_classes = bundle.get("class_labels", bundle.get("classes", [APP_TEXT["binary_negative"], APP_TEXT["binary_positive"]]))
+raw_classes = bundle.get("class_labels", [APP_TEXT["outcome_negative"], APP_TEXT["outcome_positive"]])
 classes = [str(x) for x in raw_classes]
 if len(classes) != 2:
     st.error(APP_TEXT["binary_model_error"])
@@ -381,55 +359,55 @@ model_name = bundle.get("model_name", "Logistic Regression")
 st.title(study_title)
 st.subheader(APP_TEXT["subtitle"])
 st.caption(APP_TEXT["caption"])
+st.caption(APP_TEXT["model_file"])
 
 with st.sidebar:
-    st.header(APP_TEXT["section_model"])
-    st.write(f"**Model**: {model_name}")
-    st.write(f"**Outcome**: {APP_TEXT['binary_positive']}")
-    st.write(f"**Number of variables**: {len(feature_cols)}")
-    st.write(f"**Threshold**: {threshold:.3f}")
+    st.header(APP_TEXT["model_section"])
+    st.write(f"**模型名称：** {model_name}")
+    st.write(f"**预测结局：** {APP_TEXT['outcome_positive']}")
+    st.write(f"**变量数量：** {len(feature_cols)}")
+    st.write(f"**判定阈值：** {threshold:.3f}")
     if ruleout_threshold is not None and rulein_threshold is not None:
-        st.write(f"**Rule-out / Rule-in**: {ruleout_threshold:.3f} / {rulein_threshold:.3f}")
+        st.write(f"**Rule-out / Rule-in：** {ruleout_threshold:.3f} / {rulein_threshold:.3f}")
 
-    st.header(APP_TEXT["section_notice"])
+    st.header(APP_TEXT["notice_section"])
     st.write(APP_TEXT["notice_text"])
 
 toolbar_col1, toolbar_col2 = st.columns(2)
-if toolbar_col1.button(APP_TEXT["fill_default"], use_container_width=True):
+if toolbar_col1.button(APP_TEXT["reset_button"], use_container_width=True):
     apply_state(defaults)
-if toolbar_col2.button(APP_TEXT["fill_example"], use_container_width=True):
+if toolbar_col2.button(APP_TEXT["example_button"], use_container_width=True):
     apply_state(example_patient)
 
 st.markdown("---")
-st.header(APP_TEXT["section_input"])
-st.caption("建议使用经过核对的患者真实数据；初始值仅用于页面演示。")
+st.header(APP_TEXT["input_section"])
+st.caption(APP_TEXT["input_caption"])
 
 with st.form("prediction_form"):
     input_cols = st.columns(2)
     for idx, feat in enumerate(feature_cols):
         meta = feature_meta[feat]
         label = meta.get("label_zh", feat)
-        unit = meta.get("unit", "")
-        label_show = f"{label} ({unit})" if unit else label
         help_text = meta.get("help_zh", "")
         if meta.get("normal_range"):
-            help_text = f"{help_text}\n正常参考：{meta['normal_range']}"
-        help_text = f"{help_text}\n{APP_TEXT['input_help_prefix']}: {feat}".strip()
+            help_text = f"{help_text}\n参考范围：{meta['normal_range']}"
+        help_text = f"{help_text}\n变量代码：{feat}".strip()
         state_key = f"input_{feat}"
+
         with input_cols[idx % 2]:
             if meta.get("input_type") == "binary":
                 current_value = int(round(float(st.session_state[state_key])))
                 st.selectbox(
-                    label_show,
+                    label,
                     options=[0, 1],
                     index=1 if current_value == 1 else 0,
-                    format_func=lambda x: APP_TEXT["yes"] if x == 1 else APP_TEXT["no"],
+                    format_func=lambda x: APP_TEXT["binary_yes"] if x == 1 else APP_TEXT["binary_no"],
                     key=state_key,
                     help=help_text,
                 )
             else:
                 st.number_input(
-                    label_show,
+                    label,
                     min_value=float(meta.get("min", -1e9)),
                     max_value=float(meta.get("max", 1e9)),
                     step=float(meta.get("step", 0.1)),
@@ -437,18 +415,19 @@ with st.form("prediction_form"):
                     key=state_key,
                     help=help_text,
                 )
+
     submitted = st.form_submit_button(APP_TEXT["predict_button"], use_container_width=True)
 
 if submitted:
     x_row = prepare_input_frame(feature_cols)
     if x_row.isna().any().any():
-        st.error("检测到缺失或非数值输入，请重新检查。")
+        st.error(APP_TEXT["input_error"])
         st.stop()
 
     try:
         proba = np.asarray(model.predict_proba(x_row)[0], dtype=float)
     except Exception as exc:
-        st.error("模型推理失败。请检查 LR.pkl 是否与当前变量顺序完全一致。")
+        st.error(APP_TEXT["predict_error"])
         st.exception(exc)
         st.stop()
 
@@ -459,25 +438,26 @@ if submitted:
     class_to_proba = dict(zip(classes, proba))
     if positive_label not in class_to_proba:
         positive_label = classes[1]
+
     unfavorable_prob = float(class_to_proba[positive_label])
     predicted_label = positive_label if unfavorable_prob >= threshold else [c for c in classes if c != positive_label][0]
     risk_band = classify_risk(unfavorable_prob, threshold, ruleout_threshold, rulein_threshold)
 
     st.markdown("---")
-    st.header(APP_TEXT["section_result"])
+    st.header(APP_TEXT["result_section"])
     result_col1, result_col2, result_col3 = st.columns(3)
     result_col1.metric(APP_TEXT["risk_probability"], f"{unfavorable_prob:.3f}")
     result_col2.metric(APP_TEXT["predicted_label"], predicted_label)
     result_col3.metric(APP_TEXT["risk_band"], risk_band)
-    st.caption(f"{APP_TEXT['threshold_label']}: {threshold:.3f}")
+    st.caption(f"{APP_TEXT['threshold_label']}：{threshold:.3f}")
 
-    st.header(APP_TEXT["section_prob"])
+    st.header(APP_TEXT["prob_section"])
     prob_df = pd.DataFrame(
         {
-            APP_TEXT["probability_table_class"]: classes,
-            APP_TEXT["probability_table_probability"]: [float(class_to_proba[c]) for c in classes],
+            APP_TEXT["prob_table_class"]: classes,
+            APP_TEXT["prob_table_probability"]: [float(class_to_proba[c]) for c in classes],
         }
-    ).sort_values(APP_TEXT["probability_table_probability"], ascending=False)
+    ).sort_values(APP_TEXT["prob_table_probability"], ascending=False)
     st.dataframe(prob_df, use_container_width=True, hide_index=True)
 
     summary_df = pd.DataFrame(
@@ -495,10 +475,10 @@ if submitted:
         mime="text/csv",
     )
 
-    st.header(APP_TEXT["section_interpret"])
+    st.header(APP_TEXT["interpret_section"])
     coef_table, exported_coef = build_coefficient_table(bundle, model, feature_cols, feature_meta)
     if coef_table is None:
-        st.info(APP_TEXT["no_interpret_note"])
+        st.info(APP_TEXT["coef_missing_note"])
     else:
         st.caption(APP_TEXT["coef_exported_note"] if exported_coef else APP_TEXT["coef_fallback_note"])
         plot_df = coef_table.copy()
@@ -506,7 +486,7 @@ if submitted:
         plot_df = plot_df.sort_values("abs_coef", ascending=True).tail(min(10, len(plot_df)))
 
         fig, ax = plt.subplots(figsize=(8, 5))
-        colors = ["#c0392b" if v >= 0 else "#2980b9" for v in plot_df["coefficient"]]
+        colors = ["#c0392b" if value >= 0 else "#2980b9" for value in plot_df["coefficient"]]
         ax.barh(plot_df.get("label_zh", plot_df["feature"]), plot_df["coefficient"], color=colors)
         ax.axvline(0, color="#555555", linewidth=1)
         ax.set_title("变量系数方向与相对强度")
@@ -517,13 +497,13 @@ if submitted:
         show_cols = [c for c in ["label_zh", "feature", "coefficient", "odds_ratio", "direction_zh"] if c in coef_table.columns]
         st.dataframe(coef_table[show_cols], use_container_width=True, hide_index=True)
 
-    st.header(APP_TEXT["section_snapshot"])
+    st.header(APP_TEXT["snapshot_section"])
     snapshot_rows = []
     for feat in feature_cols:
         meta = feature_meta[feat]
         raw_value = st.session_state[f"input_{feat}"]
         if meta.get("input_type") == "binary":
-            display_value = APP_TEXT["yes"] if int(raw_value) == 1 else APP_TEXT["no"]
+            display_value = APP_TEXT["binary_yes"] if int(raw_value) == 1 else APP_TEXT["binary_no"]
         else:
             display_value = raw_value
         snapshot_rows.append(
